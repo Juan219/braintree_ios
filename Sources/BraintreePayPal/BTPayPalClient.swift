@@ -48,14 +48,20 @@ import BraintreeDataCollector
     
     /// Tracks if we have already called `UIApplication.shared.open` and have an active session in progress
     var hasOpenedURL = false
-    
+
     // MARK: - Static Properties
 
     /// This static instance of `BTPayPalClient` is used during the app switch process.
     /// We require a static reference of the client to call `handleReturnURL` and return to the app.
     static var payPalClient: BTPayPalClient?
 
+    /// Shared across all instances so only one pending session exists at a time.
+    /// Mirrors the same pattern as `payPalClient`. Exposed for testing.
+    static var pendingStore: BTPayPalPendingStoreProtocol = BTPayPalInMemoryPendingStore()
+
     // MARK: - Private Properties
+
+    private var isAutoTokenizing = false
 
     private var universalLink: URL?
     
@@ -65,9 +71,10 @@ import BraintreeDataCollector
     /// Will only be `true` if the user proceed through the `UIAlertController`
     private var webSessionReturned: Bool = false
 
-    /// Used for linking events from the client to server side request
-    /// In the PayPal flow this will be either an EC token or a Billing Agreement token
-    private var contextID: String?
+    /// Used for linking events from the client to server side request.
+    /// In the PayPal flow this will be either an EC token or a Billing Agreement token.
+    /// Exposed for testing pending app switch recovery.
+    var contextID: String?
     
     /// Used to determine whether or not to render the WAS popup.
     /// If the experiement is enabled, set the `prefersEphemeralWebBrowserSession` flag to true.
@@ -286,12 +293,33 @@ import BraintreeDataCollector
     }
     
     @objc func applicationDidBecomeActive(notification: Notification) {
-        webSessionReturned = true
-        
-        /// reset the `hasOpenedURL` flag to allow for future app switch attempts
-        /// in cases where the customer abandons the flow without a return URL or failure
-        /// returned to the SDK then reopens the merchant app and attempts the PayPal flow again
-        hasOpenedURL = false
+        Task { @MainActor in
+            self.webSessionReturned = true
+            self.hasOpenedURL = false
+
+            guard self === BTPayPalClient.payPalClient else {
+                return
+            }
+
+            guard !self.isAutoTokenizing else {
+                return
+            }
+
+            self.isAutoTokenizing = true
+
+            guard let session = await BTPayPalClient.pendingStore.read() else {
+                self.isAutoTokenizing = false
+                return
+            }
+
+            guard !session.isExpired else {
+                await BTPayPalClient.pendingStore.clear()
+                self.isAutoTokenizing = false
+                return
+            }
+
+            await self.attemptAutoLink(session: session)
+        }
     }
     
     func handlePayPalRequest(with url: URL, paymentType: BTPayPalPaymentType) async throws -> BTPayPalAccountNonce {
@@ -393,42 +421,52 @@ import BraintreeDataCollector
     // MARK: - App Switch Methods
 
     func handleReturnURL(_ url: URL) {
-        /// reset the `hasOpenedURL` flag to allow for future app switch
-        /// attempts after we have returned successfully
-        hasOpenedURL = false
+        Task { @MainActor in
+            await BTPayPalClient.pendingStore.clear()
+            self.isAutoTokenizing = false
+            self.hasOpenedURL = false
 
-        guard let returnURL = BTPayPalReturnURL(.payPalApp(url: url)) else {
-            notifyFailure(with: BTPayPalError.invalidURL("App Switch return URL cannot be nil"))
-            appSwitchCompletion(nil, BTPayPalError.invalidURL("App Switch return URL cannot be nil"))
-            return
-        }
-
-        switch returnURL.state {
-        case .succeeded, .canceled:
-            guard let payPalRequest else {
-                notifyFailure(with: BTPayPalError.missingPayPalRequest)
-                appSwitchCompletion(nil, BTPayPalError.missingPayPalRequest)
+            guard let returnURL = BTPayPalReturnURL(.payPalApp(url: url)) else {
+                self.notifyFailure(with: BTPayPalError.invalidURL("App Switch return URL cannot be nil"))
+                self.appSwitchCompletion(nil, BTPayPalError.invalidURL("App Switch return URL cannot be nil"))
                 return
             }
 
-            Task {
-                do {
-                    let nonce = try await handleReturn(url, paymentType: payPalRequest.paymentType)
-                    appSwitchCompletion(nonce, nil)
-                } catch {
-                    appSwitchCompletion(nil, error)
+            switch returnURL.state {
+            case .succeeded, .canceled:
+                guard let payPalRequest = self.payPalRequest else {
+                    self.notifyFailure(with: BTPayPalError.missingPayPalRequest)
+                    self.appSwitchCompletion(nil, BTPayPalError.missingPayPalRequest)
+                    return
                 }
+
+                do {
+                    let nonce = try await self.handleReturn(url, paymentType: payPalRequest.paymentType)
+                    self.appSwitchCompletion(nonce, nil)
+                } catch {
+                    self.appSwitchCompletion(nil, error)
+                }
+            case .unknownPath:
+                self.notifyFailure(with: BTPayPalError.appSwitchReturnURLPathInvalid)
+                self.appSwitchCompletion(nil, BTPayPalError.appSwitchReturnURLPathInvalid)
             }
-        case .unknownPath:
-            notifyFailure(with: BTPayPalError.appSwitchReturnURLPathInvalid)
-            appSwitchCompletion(nil, BTPayPalError.appSwitchReturnURLPathInvalid)
         }
     }
 
     // MARK: - Private Methods
 
+    private func isPendingApprovalResponse(_ response: HTTPURLResponse?) -> Bool {
+        response?.statusCode == 202
+    }
+
     private func tokenize(request: BTPayPalRequest) async throws -> BTPayPalAccountNonce {
         self.payPalRequest = request
+
+        let pendingSession = await BTPayPalClient.pendingStore.read()
+
+        if let nonce = await tokenizePendingSessionIfAvailable(pendingSession) {
+            return nonce
+        }
 
         apiClient.sendAnalyticsEvent(
             BTPayPalAnalytics.tokenizeStarted,
@@ -518,7 +556,122 @@ import BraintreeDataCollector
             throw httpError
         }
     }
+
+    private func tokenizePendingSessionIfAvailable(
+        _ pendingSession: BTPayPalAppSwitchSession?
+    ) async -> BTPayPalAccountNonce? {
+        guard isVaultRequest, let session = pendingSession, session.paymentType == .vault else { return nil }
+
+        guard !session.isExpired else {
+            await BTPayPalClient.pendingStore.clear()
+            return nil
+        }
+
+        do {
+            let nonce = try await tokenizePendingSession(session)
+            await BTPayPalClient.pendingStore.clear()
+            return notifySuccess(with: nonce)
+        } catch {
+            if let payPalError = error as? BTPayPalError, payPalError == .autoLinkFailed {
+                return nil
+            }
+            await BTPayPalClient.pendingStore.clear()
+            return nil
+        }
+    }
+
+    private func activeAppSwitchContext() -> (contextID: String, correlationID: String?)? {
+        guard
+            let activeClient = BTPayPalClient.payPalClient,
+            self === activeClient,
+            let contextID = activeClient.contextID
+        else {
+            return nil
+        }
+
+        return (contextID, activeClient.clientMetadataIDs[contextID])
+    }
     
+    private func attemptAutoLink(session: BTPayPalAppSwitchSession) async {
+        defer {
+            isAutoTokenizing = false
+        }
+
+        let appSwitchContext = activeAppSwitchContext()
+
+        apiClient.sendAnalyticsEvent(
+            BTPayPalAnalytics.autoLinkStarted,
+            contextID: appSwitchContext?.contextID,
+            contextType: contextType,
+            correlationID: appSwitchContext?.correlationID,
+            isVaultRequest: isVaultRequest
+        )
+
+        do {
+            let nonce = try await tokenizePendingSession(session)
+            await BTPayPalClient.pendingStore.clear()
+            apiClient.sendAnalyticsEvent(
+                BTPayPalAnalytics.autoLinkSucceeded,
+                contextID: appSwitchContext?.contextID,
+                contextType: contextType,
+                correlationID: appSwitchContext?.correlationID,
+                isVaultRequest: isVaultRequest
+            )
+            appSwitchCompletion(nonce, nil)
+        } catch {
+            apiClient.sendAnalyticsEvent(
+                BTPayPalAnalytics.autoLinkFailed,
+                contextID: appSwitchContext?.contextID,
+                contextType: contextType,
+                correlationID: appSwitchContext?.correlationID,
+                errorDescription: error.localizedDescription,
+                isVaultRequest: isVaultRequest
+            )
+        }
+    }
+
+    private func tokenizePendingSession(_ session: BTPayPalAppSwitchSession) async throws -> BTPayPalAccountNonce {
+        guard session.paymentType == .vault else {
+            throw BTPayPalError.missingBAToken
+        }
+
+        guard let appSwitchContext = activeAppSwitchContext() else {
+            throw BTPayPalError.missingBAToken
+        }
+
+        let encodableParams = PayPalAccountPOSTEncodable(
+            metadata: apiClient.metadata,
+            merchantAccountID: payPalRequest?.merchantAccountID,
+            baToken: appSwitchContext.contextID,
+            correlationID: appSwitchContext.correlationID
+        )
+
+        let paypalAccountsPath = "/v1/payment_methods/paypal_accounts"
+        let body: BTJSON?
+        let response: HTTPURLResponse?
+
+        do {
+            let (responseBody, httpResponse) = try await apiClient.post(paypalAccountsPath, parameters: encodableParams)
+            body = responseBody
+            response = httpResponse
+        } catch {
+            throw error
+        }
+
+        guard !isPendingApprovalResponse(response) else {
+            throw BTPayPalError.autoLinkFailed
+        }
+
+        guard
+            let payPalAccount = body?["paypalAccounts"].asArray()?.first,
+            let tokenizedAccount = BTPayPalAccountNonce(json: payPalAccount)
+        else {
+            throw BTPayPalError.failedToCreateNonce
+        }
+
+        return tokenizedAccount
+    }
+
     private func getFundingSource(from request: BTPayPalRequest) -> BTPayPalFundingSource {
         if let checkoutRequest = request as? BTPayPalCheckoutRequest {
             if checkoutRequest.offerCredit { return .credit }
@@ -530,11 +683,13 @@ import BraintreeDataCollector
 
     private func launchPayPalApp(with payPalAppRedirectURL: URL, merchantID: String? = nil) async throws -> BTPayPalAccountNonce {
         try await withCheckedThrowingContinuation { continuation in
-            launchPayPalApp(with: payPalAppRedirectURL, merchantID: merchantID) { nonce, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let nonce {
-                    continuation.resume(returning: nonce)
+            Task { @MainActor in
+                await launchPayPalApp(with: payPalAppRedirectURL, merchantID: merchantID) { nonce, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if let nonce {
+                        continuation.resume(returning: nonce)
+                    }
                 }
             }
         }
@@ -544,7 +699,7 @@ import BraintreeDataCollector
         with payPalAppRedirectURL: URL,
         merchantID: String? = nil,
         completion: @escaping (BTPayPalAccountNonce?, Error?) -> Void
-    ) {
+    ) async {
         /// Prevent multiple calls to open the app
         guard !hasOpenedURL else {
             apiClient.sendAnalyticsEvent(
@@ -567,6 +722,12 @@ import BraintreeDataCollector
         
         hasOpenedURL = true
         contextID = extractToken(from: payPalAppRedirectURL)
+
+        if isVaultRequest, contextID != nil {
+            await BTPayPalClient.pendingStore.store(BTPayPalAppSwitchSession(
+                paymentType: payPalRequest?.paymentType ?? .vault
+            ))
+        }
 
         apiClient.sendAnalyticsEvent(
             BTPayPalAnalytics.appSwitchStarted,

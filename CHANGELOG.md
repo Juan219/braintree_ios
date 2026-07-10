@@ -1,5 +1,10 @@
 # Braintree iOS SDK Release Notes
 
+## unreleased
+* BraintreePayPal
+  * Add support for auto-linking PayPal accounts after manual return from app switch flows.
+  * Fix PayPal auto-link error handling to continue listening for foreground events.
+
 ## 7.9.0 (2026-07-21)
 * BraintreeUIComponents
   * Fix minimum target version to iOS 16.0 to match all other modules
