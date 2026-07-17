@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(BraintreeCore)
+import BraintreeCore
+#endif
+
 // swiftlint:disable nesting
 struct Variables: Encodable {
     
@@ -14,6 +18,7 @@ struct Variables: Encodable {
         let sessionID: String?
         let customer: Customer?
         let purchaseUnits: [PurchaseUnit]?
+        let payPalCampaigns: [BTPayPalCampaign]?
         
         init(request: BTCustomerSessionRequest?, sessionID: String?) {
             self.sessionID = sessionID
@@ -21,12 +26,18 @@ struct Variables: Encodable {
             purchaseUnits = request?.purchaseUnits?.compactMap {
                 PurchaseUnit(purchaseUnit: $0)
             }
+
+            let validPayPalCampaigns = request?.payPalCampaigns.filter {
+                !$0.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            } ?? []
+            payPalCampaigns = validPayPalCampaigns.isEmpty ? nil : validPayPalCampaigns
         }
         
         enum CodingKeys: String, CodingKey {
             case sessionID = "sessionId"
             case customer
             case purchaseUnits
+            case payPalCampaigns = "paypalCampaigns"
         }
         
         struct Customer: Encodable {
