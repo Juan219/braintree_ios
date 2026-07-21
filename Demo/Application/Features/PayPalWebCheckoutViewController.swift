@@ -219,7 +219,7 @@ class PayPalWebCheckoutViewController: PaymentButtonBaseViewController {
                 countryCode: countryCodeTextField.text ?? "",
                 nationalNumber: nationalNumberTextField.text ?? ""
             ),
-            payPalCampaigns: payPalCampaigns
+            campaigns: payPalCampaigns
         )
 
         if amountBreakdownToggle.isOn {
@@ -264,7 +264,7 @@ class PayPalWebCheckoutViewController: PaymentButtonBaseViewController {
                 recurringBillingDetails: recurringBillingDetails,
                 recurringBillingPlanType: .subscription,
                 requestBillingAgreement: true,
-                payPalCampaigns: payPalCampaigns
+                campaigns: payPalCampaigns
             )
         }
 
@@ -349,7 +349,7 @@ class PayPalWebCheckoutViewController: PaymentButtonBaseViewController {
             enablePayPalAppSwitch: true,
             userAuthenticationEmail: emailTextField.text,
             userAction: .payNow,
-            payPalCampaigns: payPalCampaigns
+            campaigns: payPalCampaigns
         )
 
         payPalClient.tokenize(request) { nonce, error in
@@ -374,7 +374,7 @@ class PayPalWebCheckoutViewController: PaymentButtonBaseViewController {
             userAuthenticationEmail: emailTextField.text,
             userAction: .payNow,
             offerCredit: true,
-            payPalCampaigns: payPalCampaigns
+            campaigns: payPalCampaigns
         )
 
         payPalClient.tokenize(request) { nonce, error in
@@ -421,7 +421,7 @@ class PayPalWebCheckoutViewController: PaymentButtonBaseViewController {
             userAuthenticationEmail: emailTextField.text,
             userAction: .payNow,
             offerPayLater: true,
-            payPalCampaigns: payPalCampaigns
+            campaigns: payPalCampaigns
         )
 
         payPalClient.tokenize(request) { nonce, error in

@@ -149,7 +149,7 @@ class ShopperInsightsViewControllerV2: PaymentButtonBaseViewController {
                 purchaseUnits: [
                     BTPurchaseUnit(amount: "42.00", currencyCode: "USD")
                 ],
-                payPalCampaigns: payPalCampaigns
+                campaigns: payPalCampaigns
             )
 
             do {
@@ -177,7 +177,7 @@ class ShopperInsightsViewControllerV2: PaymentButtonBaseViewController {
             purchaseUnits: [
                 BTPurchaseUnit(amount: "42.00", currencyCode: "USD")
             ],
-            payPalCampaigns: payPalCampaigns
+            campaigns: payPalCampaigns
         )
 
         Task {
@@ -210,7 +210,7 @@ class ShopperInsightsViewControllerV2: PaymentButtonBaseViewController {
             purchaseUnits: [
                 BTPurchaseUnit(amount: "42.00", currencyCode: "USD")
             ],
-            payPalCampaigns: payPalCampaigns
+            campaigns: payPalCampaigns
         )
 
         Task {
