@@ -21,7 +21,7 @@ class GenerateCustomerRecommendationsGraphQLBody_Tests: XCTestCase {
                 currencyCode: "USD"
             )
         ],
-        payPalCampaigns: [
+        campaigns: [
             BTPayPalCampaign(id: "campaign-123-id"),
             BTPayPalCampaign(id: "campaign-456-id")
         ]
@@ -71,7 +71,7 @@ class GenerateCustomerRecommendationsGraphQLBody_Tests: XCTestCase {
             payPalAppInstalled: nil,
             venmoAppInstalled: nil,
             purchaseUnits: nil,
-            payPalCampaigns: []
+            campaigns: []
         )
         
         let body = GenerateCustomerRecommendationsGraphQLBody(request: request, sessionID: sessionID)

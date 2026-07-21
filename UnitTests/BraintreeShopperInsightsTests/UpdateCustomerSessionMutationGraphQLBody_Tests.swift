@@ -21,7 +21,7 @@ class UpdateCustomerSessionMutationGraphQLBody_Tests: XCTestCase {
                 currencyCode: "USD"
             )
         ],
-        payPalCampaigns: [
+        campaigns: [
             BTPayPalCampaign(id: "campaign-123-id"),
             BTPayPalCampaign(id: "campaign-456-id")
         ]
@@ -66,7 +66,7 @@ class UpdateCustomerSessionMutationGraphQLBody_Tests: XCTestCase {
             payPalAppInstalled: nil,
             venmoAppInstalled: nil,
             purchaseUnits: nil,
-            payPalCampaigns: []
+            campaigns: []
         )
         
         let body = UpdateCustomerSessionMutationGraphQLBody(request: request, sessionID: sessionID)

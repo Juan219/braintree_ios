@@ -20,7 +20,7 @@ class CreateCustomerSessionMutationGraphQLBody_Tests: XCTestCase {
                 currencyCode: "USD"
             )
         ],
-        payPalCampaigns: [
+        campaigns: [
             BTPayPalCampaign(id: "campaign-123-id"),
             BTPayPalCampaign(id: "campaign-456-id")
         ]
@@ -64,7 +64,7 @@ class CreateCustomerSessionMutationGraphQLBody_Tests: XCTestCase {
             payPalAppInstalled: nil,
             venmoAppInstalled: nil,
             purchaseUnits: nil,
-            payPalCampaigns: [BTPayPalCampaign(id: "campaign-123-id")]
+            campaigns: [BTPayPalCampaign(id: "campaign-123-id")]
         )
         
         let body = CreateCustomerSessionMutationGraphQLBody(request: request)
@@ -93,7 +93,7 @@ class CreateCustomerSessionMutationGraphQLBody_Tests: XCTestCase {
             payPalAppInstalled: nil,
             venmoAppInstalled: nil,
             purchaseUnits: [],
-            payPalCampaigns: []
+            campaigns: []
         )
         
         let body = CreateCustomerSessionMutationGraphQLBody(request: request)
@@ -116,7 +116,7 @@ class CreateCustomerSessionMutationGraphQLBody_Tests: XCTestCase {
 
     func testEncodingCreateCustomerSessionGraphQLBodyWithEmptyPayPalCampaignIDsOmitsThem() {
         let request = BTCustomerSessionRequest(
-            payPalCampaigns: [
+            campaigns: [
                 BTPayPalCampaign(id: ""),
                 BTPayPalCampaign(id: "   ")
             ]

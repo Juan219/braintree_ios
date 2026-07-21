@@ -2,7 +2,7 @@
 
 ## unreleased
 * BraintreeShopperInsights
-  * Add `payPalCampaigns` to `BTCustomerSessionRequest` for customer session and recommendations requests.
+  * Add `campaigns` to `BTCustomerSessionRequest` for customer session and recommendations requests.
 * BraintreeUIComponents
   * Fix minimum target version to iOS 16.0 to match all other modules
 
